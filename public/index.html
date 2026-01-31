@@ -58,7 +58,7 @@
 
     <div class="card">
         <h1>Payment Server Tester</h1>
-        <p>Click below to generate a test payment for ₹5.00</p>
+        <p>Click below to generate a test payment for ₹1.00</p>
         
         <button onclick="createPayment()">Generate QR Link</button>
         
@@ -88,7 +88,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
-                        amount: 5, 
+                        amount: 1, 
                         description: "Test Transaction from Web" 
                     })
                 });
