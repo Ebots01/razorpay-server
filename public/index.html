@@ -3,145 +3,149 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Razorpay Linux App Test</title>
+    <title>Razorpay QR Dashboard</title>
     <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f4f4f9;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 50px;
-        }
-        .card {
-            background: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            text-align: center;
-            max-width: 400px;
-            width: 100%;
-        }
-        h1 { color: #333; margin-bottom: 20px; }
-        button {
-            background-color: #528FF0; /* Razorpay Blue */
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            font-size: 16px;
-            border-radius: 5px;
-            cursor: pointer;
-            transition: background 0.3s;
-        }
-        button:hover { background-color: #4173c2; }
+        body { font-family: 'Segoe UI', sans-serif; background-color: #f4f4f9; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .container { max-width: 800px; width: 100%; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
         
-        #result { margin-top: 25px; display: none; border-top: 1px solid #eee; padding-top: 20px;}
-        #qr-link { 
-            display: block; 
-            margin: 15px 0; 
-            color: #528FF0; 
-            text-decoration: none; 
-            font-weight: bold;
-            font-size: 18px;
-        }
-        .status-box {
-            padding: 10px;
-            margin-top: 15px;
-            border-radius: 5px;
-            font-weight: bold;
-        }
-        .pending { background-color: #fff3cd; color: #856404; }
-        .success { background-color: #d4edda; color: #155724; }
+        h1 { color: #333; margin-top: 0; }
+        
+        /* Button Styles */
+        button { background-color: #528FF0; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 6px; cursor: pointer; transition: 0.2s; }
+        button:hover { background-color: #4173c2; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+
+        /* QR Display Box */
+        #payment-area { margin-top: 20px; background: #eef; padding: 20px; border-radius: 8px; text-align: center; display: none; border: 2px dashed #ccc;}
+        #qr-image { width: 200px; height: 200px; margin: 15px 0; border: 1px solid #ddd; padding: 5px; background: white; }
+        #live-status { font-weight: bold; font-size: 18px; margin-top: 10px; color: #856404; }
+
+        /* History Table */
+        table { width: 100%; border-collapse: collapse; margin-top: 30px; }
+        th, td { border-bottom: 1px solid #eee; padding: 12px; text-align: left; }
+        th { background-color: #f8f9fa; color: #555; }
+        
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .badge-success { background-color: #d4edda; color: #155724; }
+        .badge-pending { background-color: #fff3cd; color: #856404; }
     </style>
 </head>
 <body>
 
-    <div class="card">
-        <h1>Payment Server Tester</h1>
-        <p>Click below to generate a test payment for ₹1.00</p>
+    <div class="container">
+        <h1>Payment Dashboard</h1>
         
-        <button onclick="createPayment()">Generate QR Link</button>
-        
-        <div id="result">
-            <p><strong>Payment ID:</strong> <span id="payId">Loading...</span></p>
-            
-            <a id="qr-link" href="#" target="_blank">Click to Pay (Simulate QR Scan)</a>
-            
-            <div id="status-box" class="status-box pending">
-                Status: Waiting for Payment...
-            </div>
+        <div style="text-align: center; margin-bottom: 20px;">
+            <button onclick="createQRPayment()">+ Generate Test QR (₹5)</button>
         </div>
+        
+        <div id="payment-area">
+            <h3>Scan to Pay</h3>
+            <p>Order ID: <span id="display-id">...</span></p>
+            
+            <img id="qr-image" src="" alt="QR Code" />
+            
+            <div id="live-status">Status: PENDING...</div>
+        </div>
+
+        <h2>Transaction History</h2>
+        <button onclick="loadHistory()" style="background:#777; font-size: 12px; padding: 8px 12px;">Refresh List</button>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>QR ID</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody id="history-body">
+                </tbody>
+        </table>
     </div>
 
     <script>
-        let intervalId;
+        // 1. Load History on Startup
+        window.onload = loadHistory;
 
-        // 1. Create the Payment Link
-        async function createPayment() {
+        // 2. Function to Load History from Database
+        async function loadHistory() {
+            try {
+                const res = await fetch('/api/orders');
+                const orders = await res.json();
+                
+                const tbody = document.getElementById('history-body');
+                tbody.innerHTML = ''; // Clear existing rows
+
+                orders.forEach(order => {
+                    const date = new Date(order.createdAt).toLocaleString();
+                    const statusClass = order.status === 'SUCCESS' ? 'badge-success' : 'badge-pending';
+                    
+                    const row = `
+                        <tr>
+                            <td>${date}</td>
+                            <td style="font-family: monospace; font-size: 0.9em;">${order.qrId}</td>
+                            <td>₹${order.amount}</td>
+                            <td><span class="badge ${statusClass}">${order.status}</span></td>
+                        </tr>
+                    `;
+                    tbody.innerHTML += row;
+                });
+            } catch (err) {
+                console.error("History Load Error", err);
+            }
+        }
+
+        // 3. Generate New QR Code
+        async function createQRPayment() {
             const btn = document.querySelector('button');
             btn.disabled = true;
             btn.innerText = "Generating...";
 
             try {
-                // Call our Vercel Backend
-                const response = await fetch('/api/create-payment', {
+                const res = await fetch('/api/create-payment', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        amount: 1, 
-                        description: "Test Transaction from Web" 
-                    })
+                    body: JSON.stringify({ amount: 5 })
                 });
-                
-                const data = await response.json();
+                const data = await res.json();
 
-                if(data.error) {
-                    alert("Error: " + data.error);
-                    btn.disabled = false;
-                    return;
-                }
+                // Show QR Section
+                document.getElementById('payment-area').style.display = 'block';
+                document.getElementById('display-id').innerText = data.id;
+                document.getElementById('qr-image').src = data.imageUrl; // Direct Image!
+                document.getElementById('live-status').innerText = "Status: PENDING...";
+                document.getElementById('live-status').style.color = "#856404";
 
-                // Update UI
-                document.getElementById('result').style.display = 'block';
-                document.getElementById('qr-link').href = data.url;
-                document.getElementById('qr-link').innerText = "🔗 Click here to Pay"; // User clicks this instead of scanning QR for test
-                document.getElementById('payId').innerText = data.id;
-                
-                // Reset Button
-                btn.innerText = "Generate New Link";
-                btn.disabled = false;
+                // Refresh table to show new Pending item
+                loadHistory();
 
-                // 2. Start Polling (Checking status every 3 seconds)
-                if (intervalId) clearInterval(intervalId);
-                intervalId = setInterval(() => checkStatus(data.id), 3000);
+                // Start Polling
+                pollStatus(data.id);
 
-            } catch (error) {
-                console.error(error);
-                alert("Failed to connect to server.");
-                btn.disabled = false;
+            } catch (err) {
+                alert("Error: " + err.message);
             }
+            
+            btn.disabled = false;
+            btn.innerText = "+ Generate Test QR (₹5)";
         }
 
-        // 3. Check Payment Status
-        async function checkStatus(id) {
-            try {
-                const response = await fetch(`/api/check-status/${id}`);
-                const data = await response.json();
-                
-                const statusBox = document.getElementById('status-box');
-                statusBox.innerText = "Status: " + data.status;
+        // 4. Poll for Success
+        function pollStatus(id) {
+            const interval = setInterval(async () => {
+                const res = await fetch(`/api/check-status/${id}`);
+                const data = await res.json();
 
                 if (data.status === 'SUCCESS') {
-                    statusBox.className = "status-box success";
-                    statusBox.innerText = "✅ PAYMENT SUCCESSFUL!";
-                    clearInterval(intervalId); // Stop checking
-                    
-                    // Optional: Redirect or unlock feature here
-                    // alert("Payment Verified!"); 
+                    clearInterval(interval);
+                    document.getElementById('live-status').innerText = "✅ PAYMENT RECEIVED!";
+                    document.getElementById('live-status').style.color = "green";
+                    loadHistory(); // Update table final status
+                    // alert("Success! Logic to unlock app goes here.");
                 }
-            } catch (error) {
-                console.log("Polling error", error);
-            }
+            }, 3000); // Check every 3 seconds
         }
     </script>
 </body>

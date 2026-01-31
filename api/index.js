@@ -7,31 +7,35 @@ const mongoose = require('mongoose');
 
 const app = express();
 
-// --- DATABASE CONNECTION (Required for Vercel) ---
-const connectDB = async () => {
-  if (mongoose.connections[0].readyState) return;
-  await mongoose.connect(process.env.MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  });
-};
+// --- 1. DATABASE CONNECTION (Cached for Vercel) ---
+let cached = global.mongoose;
+if (!cached) {
+  cached = global.mongoose = { conn: null, promise: null };
+}
 
-// Define Schema
+async function connectDB() {
+  if (cached.conn) return cached.conn;
+  if (!cached.promise) {
+    // Connect to MongoDB Atlas
+    cached.promise = mongoose.connect(process.env.MONGODB_URI).then((mongoose) => mongoose);
+  }
+  cached.conn = await cached.promise;
+  return cached.conn;
+}
+
+// Define the Schema for our Payment Records
 const OrderSchema = new mongoose.Schema({
-  orderId: String,
-  paymentId: String,
-  amount: Number,
-  status: { type: String, default: "PENDING" }, // PENDING, SUCCESS
+  qrId: String,           // The ID of the QR Code
+  amount: Number,         // Amount in Rupees
+  status: { type: String, default: "PENDING" }, // PENDING or SUCCESS
   createdAt: { type: Date, default: Date.now }
 });
 const Order = mongoose.models.Order || mongoose.model('Order', OrderSchema);
 
-// --- MIDDLEWARE ---
-// Capture Raw Body for Webhook Verification
+// --- 2. MIDDLEWARE ---
+// Capture Raw Body for Webhook Signature Verification
 app.use(express.json({
-  verify: (req, res, buf) => {
-    req.rawBody = buf;
-  }
+  verify: (req, res, buf) => { req.rawBody = buf; }
 }));
 app.use(cors());
 
@@ -41,54 +45,61 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
-// --- ROUTE 1: Default (Test if server is running) ---
-app.get('/', (req, res) => {
-  res.send('Razorpay Payment Server is Running on Vercel!');
-});
-
-// --- ROUTE 2: Create Payment Link ---
+// --- ROUTE 1: Create QR Code (Returns Image URL) ---
 app.post('/api/create-payment', async (req, res) => {
   await connectDB();
   const { amount, description } = req.body;
 
   try {
-    const paymentLink = await razorpay.paymentLink.create({
-      amount: amount * 100,
-      currency: "INR",
-      description: description || "App Payment",
-      customer: { name: "User", contact: "+919000090000" },
-      notify: { sms: false, email: false },
-      callback_url: "https://your-vercel-app.vercel.app/success", // Optional
+    // Generate a Single-Use UPI QR Code
+    const qrCode = await razorpay.qrCode.create({
+      type: "upi_qr",
+      name: "App Payment",
+      usage: "single_use",       // Expire after 1 payment
+      fixed_amount: true,        // User cannot change amount
+      payment_amount: amount * 100, // Amount in paise (e.g. 500 = ₹5)
+      description: description || "Scan to Pay",
+      close_by: Math.floor(Date.now() / 1000) + 300 // Expire in 5 mins
     });
 
-    // Save to MongoDB
+    // Save to MongoDB History
     await Order.create({
-      orderId: paymentLink.id,
+      qrId: qrCode.id,
       amount: amount,
       status: "PENDING"
     });
 
+    // Return the Direct Image URL
     res.json({
-      id: paymentLink.id,
-      url: paymentLink.short_url,
+      id: qrCode.id,
+      imageUrl: qrCode.image_url, 
       status: "PENDING"
     });
 
   } catch (error) {
+    console.error(error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// --- ROUTE 3: Check Status ---
+// --- ROUTE 2: Check Status (Polling) ---
 app.get('/api/check-status/:id', async (req, res) => {
   await connectDB();
-  const order = await Order.findOne({ orderId: req.params.id });
+  const order = await Order.findOne({ qrId: req.params.id });
   
   if (!order) return res.status(404).json({ status: "NOT_FOUND" });
   res.json({ status: order.status });
 });
 
-// --- ROUTE 4: Webhook ---
+// --- ROUTE 3: Get All History (For Dashboard Table) ---
+app.get('/api/orders', async (req, res) => {
+  await connectDB();
+  // Return all orders, newest first
+  const orders = await Order.find().sort({ createdAt: -1 });
+  res.json(orders);
+});
+
+// --- ROUTE 4: Webhook (The Automatic Verification) ---
 app.post('/api/webhook', async (req, res) => {
   await connectDB();
   const secret = process.env.WEBHOOK_SECRET;
@@ -97,20 +108,21 @@ app.post('/api/webhook', async (req, res) => {
   // Verify Signature
   const shasum = crypto.createHmac('sha256', secret);
   shasum.update(req.rawBody);
-  const digest = shasum.digest('hex');
-
-  if (digest === signature) {
+  
+  if (shasum.digest('hex') === signature) {
     const event = req.body.event;
     const payload = req.body.payload;
 
-    if (event === 'payment_link.paid') {
-      const plinkId = payload.payment_link.entity.id;
-      // Update MongoDB
+    // EVENT: When a QR Code receives money
+    if (event === 'qr_code.credited') {
+      const qrId = payload.qr_code.entity.id;
+      console.log(`✅ Payment Received for QR: ${qrId}`);
+      
+      // Update Database Status
       await Order.findOneAndUpdate(
-        { orderId: plinkId },
+        { qrId: qrId },
         { status: "SUCCESS" }
       );
-      console.log(`Payment Verified: ${plinkId}`);
     }
     res.json({ status: 'ok' });
   } else {
@@ -118,5 +130,5 @@ app.post('/api/webhook', async (req, res) => {
   }
 });
 
-// Export for Vercel (Do not use app.listen)
+// Export for Vercel
 module.exports = app;
