@@ -8,19 +8,45 @@
         body { font-family: 'Segoe UI', sans-serif; background-color: #f4f4f9; padding: 20px; display: flex; flex-direction: column; align-items: center; }
         .container { max-width: 800px; width: 100%; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
         
-        h1 { color: #333; margin-top: 0; }
-        
-        /* Button Styles */
         button { background-color: #528FF0; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 6px; cursor: pointer; transition: 0.2s; }
         button:hover { background-color: #4173c2; }
         button:disabled { background-color: #ccc; cursor: not-allowed; }
 
-        /* QR Display Box */
-        #payment-area { margin-top: 20px; background: #eef; padding: 20px; border-radius: 8px; text-align: center; display: none; border: 2px dashed #ccc;}
-        #qr-image { width: 200px; height: 200px; margin: 15px 0; border: 1px solid #ddd; padding: 5px; background: white; }
-        #live-status { font-weight: bold; font-size: 18px; margin-top: 10px; color: #856404; }
+        /* --- FIXED QR STYLES --- */
+        #payment-area { 
+            margin-top: 20px; 
+            background: #fff; 
+            padding: 20px; 
+            border-radius: 8px; 
+            text-align: center; 
+            display: none; 
+            border: 2px solid #e0e0e0;
+            /* Flex column ensures content stacks vertically without squashing */
+            display: none; 
+            flex-direction: column;
+            align-items: center;
+        }
 
-        /* History Table */
+        #qr-image { 
+            /* Force exact size so it doesn't shrink */
+            width: 250px; 
+            height: 250px; 
+            min-width: 250px;
+            min-height: 250px;
+            
+            /* Ensure aspect ratio stays square */
+            object-fit: contain; 
+            
+            margin: 15px 0; 
+            border: 5px solid #333; /* Dark border to help scanning contrast */
+            border-radius: 10px;
+            background: white;
+            padding: 10px;
+        }
+        /* ----------------------- */
+
+        #live-status { font-weight: bold; font-size: 22px; margin-top: 10px; color: #856404; }
+
         table { width: 100%; border-collapse: collapse; margin-top: 30px; }
         th, td { border-bottom: 1px solid #eee; padding: 12px; text-align: left; }
         th { background-color: #f8f9fa; color: #555; }
@@ -36,14 +62,14 @@
         <h1>Payment Dashboard</h1>
         
         <div style="text-align: center; margin-bottom: 20px;">
-            <button onclick="createQRPayment()">+ Generate Test QR (₹5)</button>
+            <button onclick="createQRPayment()">+ Generate Test QR (₹1)</button>
         </div>
         
-        <div id="payment-area">
-            <h3>Scan to Pay</h3>
+        <div id="payment-area" style="display: none;">
+            <h3>Scan with Any UPI App</h3>
             <p>Order ID: <span id="display-id">...</span></p>
             
-            <img id="qr-image" src="" alt="QR Code" />
+            <img id="qr-image" src="" alt="QR Code Loading..." />
             
             <div id="live-status">Status: PENDING...</div>
         </div>
@@ -60,23 +86,20 @@
                     <th>Status</th>
                 </tr>
             </thead>
-            <tbody id="history-body">
-                </tbody>
+            <tbody id="history-body"></tbody>
         </table>
     </div>
 
     <script>
-        // 1. Load History on Startup
         window.onload = loadHistory;
 
-        // 2. Function to Load History from Database
         async function loadHistory() {
             try {
                 const res = await fetch('/api/orders');
                 const orders = await res.json();
                 
                 const tbody = document.getElementById('history-body');
-                tbody.innerHTML = ''; // Clear existing rows
+                tbody.innerHTML = ''; 
 
                 orders.forEach(order => {
                     const date = new Date(order.createdAt).toLocaleString();
@@ -97,7 +120,6 @@
             }
         }
 
-        // 3. Generate New QR Code
         async function createQRPayment() {
             const btn = document.querySelector('button');
             btn.disabled = true;
@@ -107,21 +129,21 @@
                 const res = await fetch('/api/create-payment', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ amount: 5 })
+                    // UPDATED: Amount is now 1
+                    body: JSON.stringify({ amount: 1 })
                 });
                 const data = await res.json();
 
-                // Show QR Section
-                document.getElementById('payment-area').style.display = 'block';
+                // Show QR Section with Flexbox to prevent shrinking
+                const paymentArea = document.getElementById('payment-area');
+                paymentArea.style.display = 'flex'; 
+
                 document.getElementById('display-id').innerText = data.id;
-                document.getElementById('qr-image').src = data.imageUrl; // Direct Image!
+                document.getElementById('qr-image').src = data.imageUrl; 
                 document.getElementById('live-status').innerText = "Status: PENDING...";
                 document.getElementById('live-status').style.color = "#856404";
 
-                // Refresh table to show new Pending item
                 loadHistory();
-
-                // Start Polling
                 pollStatus(data.id);
 
             } catch (err) {
@@ -129,10 +151,9 @@
             }
             
             btn.disabled = false;
-            btn.innerText = "+ Generate Test QR (₹5)";
+            btn.innerText = "+ Generate Test QR (₹1)";
         }
 
-        // 4. Poll for Success
         function pollStatus(id) {
             const interval = setInterval(async () => {
                 const res = await fetch(`/api/check-status/${id}`);
@@ -140,12 +161,11 @@
 
                 if (data.status === 'SUCCESS') {
                     clearInterval(interval);
-                    document.getElementById('live-status').innerText = "✅ PAYMENT RECEIVED!";
+                    document.getElementById('live-status').innerText = "✅ PAYMENT SUCCESSFUL!";
                     document.getElementById('live-status').style.color = "green";
-                    loadHistory(); // Update table final status
-                    // alert("Success! Logic to unlock app goes here.");
+                    loadHistory();
                 }
-            }, 3000); // Check every 3 seconds
+            }, 3000);
         }
     </script>
 </body>
