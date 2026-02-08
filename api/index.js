@@ -7,7 +7,7 @@ const mongoose = require('mongoose');
 
 const app = express();
 
-// --- DATABASE CONNECTION ---
+// --- 1. DATABASE CONNECTION (Cached for Vercel) ---
 let cached = global.mongoose;
 if (!cached) {
   cached = global.mongoose = { conn: null, promise: null };
@@ -22,17 +22,23 @@ async function connectDB() {
   return cached.conn;
 }
 
+// --- 2. UPDATED SCHEMA ---
+// Added paymentId to track the actual transaction reference
 const OrderSchema = new mongoose.Schema({
-  qrId: String,
+  qrId: { type: String, required: true, unique: true },
   amount: Number,
-  status: { type: String, default: "PENDING" },
+  status: { type: String, default: "PENDING" }, // PENDING, SUCCESS, FAILED
+  paymentId: { type: String, default: null },   // Stores Razorpay Payment ID (pay_...)
   createdAt: { type: Date, default: Date.now }
 });
 const Order = mongoose.models.Order || mongoose.model('Order', OrderSchema);
 
-// --- MIDDLEWARE ---
+// --- 3. MIDDLEWARE (Crucial for Webhook Security) ---
+// We need the 'rawBody' to verify the signature accurately.
 app.use(express.json({
-  verify: (req, res, buf) => { req.rawBody = buf; }
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
 }));
 app.use(cors());
 
@@ -46,17 +52,24 @@ app.post('/api/create-payment', async (req, res) => {
   await connectDB();
   const { amount } = req.body;
 
+  // Safety: Validate amount
+  if (!amount || amount < 1) {
+    return res.status(400).json({ error: "Invalid amount" });
+  }
+
   try {
+    // Docs: "fixed_amount: true" ensures user cannot change price
     const qrCode = await razorpay.qrCode.create({
       type: "upi_qr",
-      name: "Test Payment",
+      name: "Flutter App Payment",
       usage: "single_use",
       fixed_amount: true,
-      payment_amount: amount * 100, // Converts 1 to 100 paise
-      description: "Scan to Pay",
-      close_by: Math.floor(Date.now() / 1000) + 300
+      payment_amount: amount * 100, // Razorpay expects amount in paise (1 INR = 100 paise)
+      description: "App Transaction",
+      close_by: Math.floor(Date.now() / 1000) + 300 // Expires in 5 minutes
     });
 
+    // Save to MongoDB immediately
     await Order.create({
       qrId: qrCode.id,
       amount: amount,
@@ -70,45 +83,73 @@ app.post('/api/create-payment', async (req, res) => {
     });
 
   } catch (error) {
-    console.error(error);
+    console.error("Razorpay Error:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// --- ROUTE 2: Check Status ---
+// --- ROUTE 2: Check Status (Low Load Polling) ---
+// App calls this. We check MONGODB, NOT Razorpay API.
 app.get('/api/check-status/:id', async (req, res) => {
   await connectDB();
   const order = await Order.findOne({ qrId: req.params.id });
+  
   if (!order) return res.status(404).json({ status: "NOT_FOUND" });
-  res.json({ status: order.status });
+  
+  res.json({ 
+    status: order.status,
+    paymentId: order.paymentId 
+  });
 });
 
-// --- ROUTE 3: History ---
+// --- ROUTE 3: Transaction History ---
 app.get('/api/orders', async (req, res) => {
   await connectDB();
-  const orders = await Order.find().sort({ createdAt: -1 });
+  // Limit to last 20 to save bandwidth
+  const orders = await Order.find().sort({ createdAt: -1 }).limit(20);
   res.json(orders);
 });
 
-// --- ROUTE 4: Webhook ---
+// --- ROUTE 4: WEBHOOK (The Core Logic) ---
 app.post('/api/webhook', async (req, res) => {
   await connectDB();
+  
   const secret = process.env.WEBHOOK_SECRET;
   const signature = req.headers['x-razorpay-signature'];
 
+  // 1. Security: Verify Signature
+  // Docs: "The hash signature is calculated using HMAC with SHA256 algorithm"
   const shasum = crypto.createHmac('sha256', secret);
   shasum.update(req.rawBody);
-  
-  if (shasum.digest('hex') === signature) {
+  const digest = shasum.digest('hex');
+
+  if (digest === signature) {
+    console.log("Webhook verified");
     const event = req.body.event;
     const payload = req.body.payload;
 
+    // 2. Handle 'qr_code.credited'
+    // Docs: "Triggered when a payment is made using a QR code."
     if (event === 'qr_code.credited') {
-      const qrId = payload.qr_code.entity.id;
-      await Order.findOneAndUpdate({ qrId: qrId }, { status: "SUCCESS" });
+      const qrEntity = payload.qr_code.entity;
+      const paymentEntity = payload.payment.entity;
+
+      // Update DB with Success and Payment ID
+      await Order.findOneAndUpdate(
+        { qrId: qrEntity.id }, 
+        { 
+          status: "SUCCESS", 
+          paymentId: paymentEntity.id // Save the 'pay_...' ID
+        }
+      );
+      console.log(`Order ${qrEntity.id} marked SUCCESS`);
     }
+
+    // 3. Always return 200 OK quickly (within 5 seconds)
     res.json({ status: 'ok' });
   } else {
+    // Security Fail
+    console.error("Invalid Webhook Signature");
     res.status(400).json({ status: 'invalid_signature' });
   }
 });

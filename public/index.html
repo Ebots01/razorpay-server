@@ -3,170 +3,132 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Razorpay QR Dashboard</title>
+    <title>Razorpay Linux App Test</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background-color: #f4f4f9; padding: 20px; display: flex; flex-direction: column; align-items: center; }
-        .container { max-width: 800px; width: 100%; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        body { font-family: 'Segoe UI', sans-serif; background-color: #f0f2f5; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); width: 100%; max-width: 600px; text-align: center; }
+        h1 { color: #333; font-size: 24px; margin-bottom: 10px; }
         
-        button { background-color: #528FF0; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 6px; cursor: pointer; transition: 0.2s; }
-        button:hover { background-color: #4173c2; }
-        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        .btn-main { background-color: #2F80ED; color: white; border: none; padding: 15px 30px; font-size: 18px; border-radius: 8px; cursor: pointer; font-weight: 600; width: 100%; transition: 0.2s; }
+        .btn-main:hover { background-color: #1c68c9; }
+        .btn-main:disabled { background-color: #bdc3c7; cursor: not-allowed; }
 
-        /* --- FIXED QR STYLES --- */
-        #payment-area { 
-            margin-top: 20px; 
-            background: #fff; 
-            padding: 20px; 
-            border-radius: 8px; 
-            text-align: center; 
-            display: none; 
-            border: 2px solid #e0e0e0;
-            /* Flex column ensures content stacks vertically without squashing */
-            display: none; 
-            flex-direction: column;
-            align-items: center;
-        }
-
-        #qr-image { 
-            /* Force exact size so it doesn't shrink */
-            width: 250px; 
-            height: 250px; 
-            min-width: 250px;
-            min-height: 250px;
-            
-            /* Ensure aspect ratio stays square */
-            object-fit: contain; 
-            
-            margin: 15px 0; 
-            border: 5px solid #333; /* Dark border to help scanning contrast */
-            border-radius: 10px;
-            background: white;
-            padding: 10px;
-        }
-        /* ----------------------- */
-
-        #live-status { font-weight: bold; font-size: 22px; margin-top: 10px; color: #856404; }
-
-        table { width: 100%; border-collapse: collapse; margin-top: 30px; }
-        th, td { border-bottom: 1px solid #eee; padding: 12px; text-align: left; }
-        th { background-color: #f8f9fa; color: #555; }
+        #qr-section { margin-top: 25px; display: none; flex-direction: column; align-items: center; border-top: 1px solid #eee; padding-top: 20px; }
+        #qr-image { width: 220px; height: 220px; border: 1px solid #ddd; border-radius: 8px; padding: 10px; background: white; }
         
-        .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
-        .badge-success { background-color: #d4edda; color: #155724; }
-        .badge-pending { background-color: #fff3cd; color: #856404; }
+        .status-box { margin-top: 15px; padding: 10px; border-radius: 6px; font-weight: bold; width: 100%; }
+        .status-pending { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+        .status-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+
+        .history-list { margin-top: 30px; width: 100%; text-align: left; }
+        .history-item { background: #fff; border-bottom: 1px solid #eee; padding: 10px; display: flex; justify-content: space-between; font-size: 14px; }
+        .history-id { font-family: monospace; color: #666; }
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <h1>Payment Dashboard</h1>
+    <div class="card">
+        <h1>🐧 Linux App Payment Test</h1>
+        <p style="color:#666; margin-bottom: 20px;">Simulates Flutter App Logic</p>
         
-        <div style="text-align: center; margin-bottom: 20px;">
-            <button onclick="createQRPayment()">+ Generate Test QR (₹1)</button>
-        </div>
-        
-        <div id="payment-area" style="display: none;">
-            <h3>Scan with Any UPI App</h3>
-            <p>Order ID: <span id="display-id">...</span></p>
-            
-            <img id="qr-image" src="" alt="QR Code Loading..." />
-            
-            <div id="live-status">Status: PENDING...</div>
+        <button id="payBtn" class="btn-main" onclick="startPayment()">Generate QR (₹1)</button>
+
+        <div id="qr-section">
+            <div id="status-indicator" class="status-box status-pending">
+                Waiting for payment...
+            </div>
+            <img id="qr-image" src="" alt="QR Code" />
+            <p style="font-size: 12px; color: #888;">Order ID: <span id="display-id"></span></p>
         </div>
 
-        <h2>Transaction History</h2>
-        <button onclick="loadHistory()" style="background:#777; font-size: 12px; padding: 8px 12px;">Refresh List</button>
-        
-        <table>
-            <thead>
-                <tr>
-                    <th>Time</th>
-                    <th>QR ID</th>
-                    <th>Amount</th>
-                    <th>Status</th>
-                </tr>
-            </thead>
-            <tbody id="history-body"></tbody>
-        </table>
+        <div class="history-list">
+            <h3>Recent Orders (Server DB)</h3>
+            <div id="history-container">Loading...</div>
+        </div>
     </div>
 
     <script>
-        window.onload = loadHistory;
+        // Poll every 3 seconds
+        let pollInterval;
 
-        async function loadHistory() {
-            try {
-                const res = await fetch('/api/orders');
-                const orders = await res.json();
-                
-                const tbody = document.getElementById('history-body');
-                tbody.innerHTML = ''; 
-
-                orders.forEach(order => {
-                    const date = new Date(order.createdAt).toLocaleString();
-                    const statusClass = order.status === 'SUCCESS' ? 'badge-success' : 'badge-pending';
-                    
-                    const row = `
-                        <tr>
-                            <td>${date}</td>
-                            <td style="font-family: monospace; font-size: 0.9em;">${order.qrId}</td>
-                            <td>₹${order.amount}</td>
-                            <td><span class="badge ${statusClass}">${order.status}</span></td>
-                        </tr>
-                    `;
-                    tbody.innerHTML += row;
-                });
-            } catch (err) {
-                console.error("History Load Error", err);
-            }
-        }
-
-        async function createQRPayment() {
-            const btn = document.querySelector('button');
+        async function startPayment() {
+            const btn = document.getElementById('payBtn');
+            const qrSection = document.getElementById('qr-section');
+            const statusBox = document.getElementById('status-indicator');
+            
             btn.disabled = true;
-            btn.innerText = "Generating...";
+            btn.innerText = "Creating Order...";
 
             try {
+                // 1. Tell Server to Create QR
                 const res = await fetch('/api/create-payment', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    // UPDATED: Amount is now 1
-                    body: JSON.stringify({ amount: 1 })
+                    body: JSON.stringify({ amount: 1 }) // ₹1.00
                 });
                 const data = await res.json();
 
-                // Show QR Section with Flexbox to prevent shrinking
-                const paymentArea = document.getElementById('payment-area');
-                paymentArea.style.display = 'flex'; 
+                if (data.error) throw new Error(data.error);
 
+                // 2. Show QR
+                qrSection.style.display = 'flex';
+                document.getElementById('qr-image').src = data.imageUrl;
                 document.getElementById('display-id').innerText = data.id;
-                document.getElementById('qr-image').src = data.imageUrl; 
-                document.getElementById('live-status').innerText = "Status: PENDING...";
-                document.getElementById('live-status').style.color = "#856404";
+                
+                statusBox.className = "status-box status-pending";
+                statusBox.innerText = "⏳ Scan QR with UPI App...";
 
-                loadHistory();
-                pollStatus(data.id);
+                // 3. Start Polling Server (Not Razorpay)
+                if (pollInterval) clearInterval(pollInterval);
+                pollInterval = setInterval(() => checkStatus(data.id), 3000);
 
             } catch (err) {
                 alert("Error: " + err.message);
+                btn.disabled = false;
+                btn.innerText = "Generate QR (₹1)";
             }
-            
-            btn.disabled = false;
-            btn.innerText = "+ Generate Test QR (₹1)";
         }
 
-        function pollStatus(id) {
-            const interval = setInterval(async () => {
-                const res = await fetch(`/api/check-status/${id}`);
+        async function checkStatus(qrId) {
+            try {
+                const res = await fetch(`/api/check-status/${qrId}`);
                 const data = await res.json();
 
                 if (data.status === 'SUCCESS') {
-                    clearInterval(interval);
-                    document.getElementById('live-status').innerText = "✅ PAYMENT SUCCESSFUL!";
-                    document.getElementById('live-status').style.color = "green";
+                    clearInterval(pollInterval);
+                    const statusBox = document.getElementById('status-indicator');
+                    statusBox.className = "status-box status-success";
+                    statusBox.innerHTML = `✅ PAID! <br><span style="font-size:12px">Ref: ${data.paymentId}</span>`;
+                    
+                    document.getElementById('payBtn').disabled = false;
+                    document.getElementById('payBtn').innerText = "Generate New QR (₹1)";
                     loadHistory();
                 }
-            }, 3000);
+            } catch (err) {
+                console.error("Polling error", err);
+            }
         }
+
+        async function loadHistory() {
+            const res = await fetch('/api/orders');
+            const orders = await res.json();
+            const container = document.getElementById('history-container');
+            container.innerHTML = orders.map(o => `
+                <div class="history-item">
+                    <div>
+                        <div class="history-id">${o.qrId}</div>
+                        <div style="font-size:11px; color:#aaa">${new Date(o.createdAt).toLocaleTimeString()}</div>
+                    </div>
+                    <div>
+                        <span style="font-weight:bold; color: ${o.status === 'SUCCESS' ? 'green' : 'orange'}">${o.status}</span>
+                        <div>₹${o.amount}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Load history on start
+        loadHistory();
     </script>
 </body>
 </html>
